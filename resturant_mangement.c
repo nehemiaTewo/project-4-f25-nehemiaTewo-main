@@ -204,3 +204,47 @@ static void *chef_thread(void *arg) {
     return NULL;
 }
 
+// Waiter: deliver dishes; seat customers; place orders
+static void *waiter_thread(void *arg) {
+    (void)arg; unsigned long tid = (unsigned long)pthread_self();
+    for (;;) {
+        order_t ready;
+        if (dq_try_pop(&done_q, &ready)) {
+            customer_t *c = ready.cust;
+            pthread_mutex_lock(&c->mu); c->meal_ready = true; pthread_cond_signal(&c->cv_meal); pthread_mutex_unlock(&c->mu);
+            log_event("Waiter", tid, "delivered order %d (cid=%d)", ready.id, c->cid);
+            continue;
+        }
+
+        customer_t *c = NULL;
+        if (sem_trywait(&tables_sem) == 0) {
+            if (cq_try_pop(&waiting_q, &c)) {
+                pthread_mutex_lock(&c->mu); c->seated = true; pthread_cond_signal(&c->cv_seated); pthread_mutex_unlock(&c->mu);
+                log_event("Waiter", tid, "seated customer (cid=%d)", c->cid);
+                order_t ord;
+                pthread_mutex_lock(&g_order_id_mu); ord.id = g_next_order_id++; pthread_mutex_unlock(&g_order_id_mu);
+                ord.cust = c;
+                oq_push(&order_q, ord);
+                log_event("Waiter", tid, "took order %d (cid=%d)", ord.id, c->cid);
+                continue;
+            } else {
+                sem_post(&tables_sem);
+            }
+        }
+        struct timespec ts; struct timeval tv; gettimeofday(&tv, NULL);
+        ts.tv_sec = tv.tv_sec; ts.tv_nsec = (tv.tv_usec + 200*1000) * 1000;
+        if (ts.tv_nsec >= 1000000000L) { ts.tv_sec += 1; ts.tv_nsec -= 1000000000L; }
+
+        pthread_mutex_lock(&done_q.mu);
+        int rc = 0; (void)rc;
+        if (done_q.count == 0) rc = pthread_cond_timedwait(&done_q.not_empty, &done_q.mu, &ts);
+        pthread_mutex_unlock(&done_q.mu);
+
+        pthread_mutex_lock(&g_count_mu);
+        int done = (customers_served >= TOTAL_CUSTOMERS);
+        pthread_mutex_unlock(&g_count_mu);
+        if (done && queues_all_empty()) break;
+    }
+    log_event("Waiter", tid, "exiting");
+    return NULL;
+}
