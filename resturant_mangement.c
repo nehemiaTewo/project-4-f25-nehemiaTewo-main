@@ -191,6 +191,10 @@ static void *chef_thread(void *arg) {
         int done = (customers_served >= TOTAL_CUSTOMERS);
         pthread_mutex_unlock(&g_count_mu);
         order_t ord;
+        if (!oq_try_pop(&order_q, &ord)) {
+            if (done) break;
+            ord = oq_pop(&order_q);
+        }
         log_event("Chef", tid, "cooking order %d (cid=%d)", ord.id, ord.cust->cid);
         rnd_sleep_ms(1000, 3000);
         dq_push(&done_q, ord);
