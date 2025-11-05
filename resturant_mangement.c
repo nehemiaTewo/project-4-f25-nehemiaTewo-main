@@ -139,3 +139,48 @@ static done_queue_t  done_q;
 static void rnd_sleep_ms(int lo, int hi) {
     int span = hi - lo + 1; if (span < 1) span = 1; int ms = lo + (rand() % span); usleep(ms * 1000);
 }
+
+static bool queues_all_empty(void) {
+    bool empty;
+    pthread_mutex_lock(&waiting_q.mu);
+    pthread_mutex_lock(&order_q.mu);
+    pthread_mutex_lock(&done_q.mu);
+    empty = (waiting_q.count == 0 && order_q.count == 0 && done_q.count == 0);
+    pthread_mutex_unlock(&done_q.mu);
+    pthread_mutex_unlock(&order_q.mu);
+    pthread_mutex_unlock(&waiting_q.mu);
+    return empty;
+}
+
+// Customer: arrive → wait → meal → eat → leave
+static void *customer_thread(void *arg) {
+    customer_t *c = (customer_t *)arg;
+    unsigned long tid = (unsigned long)pthread_self();
+    log_event("Customer", tid, "arrived (cid=%d)", c->cid);
+
+    cq_push(&waiting_q, c);
+    log_event("Customer", tid, "queued for seating (cid=%d)", c->cid);
+
+    pthread_mutex_lock(&c->mu);
+    while (!c->seated) pthread_cond_wait(&c->cv_seated, &c->mu);
+    pthread_mutex_unlock(&c->mu);
+    log_event("Customer", tid, "seated (cid=%d)", c->cid);
+
+    pthread_mutex_lock(&c->mu);
+    while (!c->meal_ready) pthread_cond_wait(&c->cv_meal, &c->mu);
+    pthread_mutex_unlock(&c->mu);
+    log_event("Customer", tid, "meal received (cid=%d)", c->cid);
+
+    rnd_sleep_ms(1500, 3000);
+
+    sem_post(&tables_sem);
+    log_event("Customer", tid, "leaving (cid=%d)", c->cid);
+
+    pthread_mutex_lock(&g_count_mu); customers_served++; pthread_mutex_unlock(&g_count_mu);
+
+    pthread_mutex_destroy(&c->mu); pthread_cond_destroy(&c->cv_seated); pthread_cond_destroy(&c->cv_meal);
+    free(c);
+    return NULL;
+}
+
+
