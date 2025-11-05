@@ -248,3 +248,32 @@ static void *waiter_thread(void *arg) {
     log_event("Waiter", tid, "exiting");
     return NULL;
 }
+
+int main(int argc, char **argv) {
+    if (argc != 6) {
+        fprintf(stderr, "Usage: %s <TOTAL_CUSTOMERS> <NUM_TABLES> <NUM_WAITERS> <NUM_CHEFS> <WAITING_CAPACITY>\n", argv[0]);
+        return 1;
+    }
+    TOTAL_CUSTOMERS = atoi(argv[1]);
+    NUM_TABLES      = atoi(argv[2]);
+    NUM_WAITERS     = atoi(argv[3]);
+    NUM_CHEFS       = atoi(argv[4]);
+    WAITING_CAPACITY= atoi(argv[5]);
+    if (TOTAL_CUSTOMERS<=0||NUM_TABLES<=0||NUM_WAITERS<=0||NUM_CHEFS<=0||WAITING_CAPACITY<=0) {
+        fprintf(stderr, "All parameters must be positive.\n");
+        return 1;
+    }
+
+    srand(1234567);
+
+    if (sem_init(&tables_sem, 0, NUM_TABLES) != 0) { perror("sem_init"); return 1; }
+    cq_init(&waiting_q, WAITING_CAPACITY);
+    oq_init(&order_q, ORDER_Q_CAP);
+    dq_init(&done_q,  DONE_Q_CAP);
+    
+    pthread_t *waiters = calloc(NUM_WAITERS, sizeof(pthread_t));
+    for (int i = 0; i < NUM_WAITERS; ++i) pthread_create(&waiters[i], NULL, waiter_thread, NULL);
+
+    pthread_t *chefs = calloc(NUM_CHEFS, sizeof(pthread_t));
+    for (int i = 0; i < NUM_CHEFS; ++i) pthread_create(&chefs[i], NULL, chef_thread, NULL);
+}
