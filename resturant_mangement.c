@@ -183,4 +183,20 @@ static void *customer_thread(void *arg) {
     return NULL;
 }
 
+// Chef: cook orders, enqueue completed
+static void *chef_thread(void *arg) {
+    (void)arg; unsigned long tid = (unsigned long)pthread_self();
+    for (;;) {
+        pthread_mutex_lock(&g_count_mu);
+        int done = (customers_served >= TOTAL_CUSTOMERS);
+        pthread_mutex_unlock(&g_count_mu);
+        order_t ord;
+        log_event("Chef", tid, "cooking order %d (cid=%d)", ord.id, ord.cust->cid);
+        rnd_sleep_ms(1000, 3000);
+        dq_push(&done_q, ord);
+        log_event("Chef", tid, "finished order %d (cid=%d)", ord.id, ord.cust->cid);
+    }
+    log_event("Chef", tid, "exiting");
+    return NULL;
+}
 
