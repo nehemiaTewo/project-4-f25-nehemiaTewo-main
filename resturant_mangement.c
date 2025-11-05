@@ -276,4 +276,26 @@ int main(int argc, char **argv) {
 
     pthread_t *chefs = calloc(NUM_CHEFS, sizeof(pthread_t));
     for (int i = 0; i < NUM_CHEFS; ++i) pthread_create(&chefs[i], NULL, chef_thread, NULL);
+
+    pthread_t *customers = calloc(TOTAL_CUSTOMERS, sizeof(pthread_t));
+    for (int i = 0; i < TOTAL_CUSTOMERS; ++i) {
+        customer_t *c = calloc(1, sizeof(customer_t));
+        c->cid = i+1; pthread_mutex_init(&c->mu, NULL); pthread_cond_init(&c->cv_seated, NULL); pthread_cond_init(&c->cv_meal, NULL);
+        c->seated = false; c->meal_ready = false;
+        pthread_create(&customers[i], NULL, customer_thread, c);
+        pthread_mutex_lock(&g_count_mu); customers_created++; pthread_mutex_unlock(&g_count_mu);
+        rnd_sleep_ms(50, 250);
+    }
+
+    for (int i = 0; i < TOTAL_CUSTOMERS; ++i) pthread_join(customers[i], NULL);
+    for (int i = 0; i < NUM_WAITERS; ++i) pthread_join(waiters[i], NULL);
+    for (int i = 0; i < NUM_CHEFS; ++i) pthread_join(chefs[i], NULL);
+
+    free(waiters); free(chefs); free(customers);
+    cq_destroy(&waiting_q); oq_destroy(&order_q); dq_destroy(&done_q);
+    sem_destroy(&tables_sem);
+
+    log_event("Main", (unsigned long)pthread_self(), "served=%d created=%d", customers_served, customers_created);
+    return 0;
 }
+
