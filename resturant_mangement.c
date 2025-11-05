@@ -106,3 +106,36 @@ static void oq_push(order_queue_t *q, order_t it) {
     pthread_cond_signal(&q->not_empty);
     pthread_mutex_unlock(&q->mu);
 }
+
+static order_t oq_pop(order_queue_t *q) {
+    pthread_mutex_lock(&q->mu);
+    while (q->count == 0) pthread_cond_wait(&q->not_empty, &q->mu);
+    order_t it = q->buf[q->head]; q->head = (q->head + 1) % q->cap; q->count--;
+    pthread_cond_signal(&q->not_full);
+    pthread_mutex_unlock(&q->mu);
+    return it;
+}
+static int oq_try_pop(order_queue_t *q, order_t *out) {
+    int ok = 0; pthread_mutex_lock(&q->mu);
+    if (q->count > 0) { *out = q->buf[q->head]; q->head = (q->head + 1) % q->cap; q->count--; pthread_cond_signal(&q->not_full); ok = 1; }
+    pthread_mutex_unlock(&q->mu); return ok;
+}
+
+typedef order_queue_t done_queue_t;
+
+static int TOTAL_CUSTOMERS, NUM_TABLES, NUM_WAITERS, NUM_CHEFS, WAITING_CAPACITY;
+static volatile int customers_created = 0;
+static volatile int customers_served  = 0;
+
+static pthread_mutex_t g_count_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_order_id_mu = PTHREAD_MUTEX_INITIALIZER;
+static int g_next_order_id = 1; // shared order id to avoid duplicates across waiters
+static sem_t tables_sem;
+
+static cust_queue_t waiting_q;
+static order_queue_t order_q;
+static done_queue_t  done_q;
+
+static void rnd_sleep_ms(int lo, int hi) {
+    int span = hi - lo + 1; if (span < 1) span = 1; int ms = lo + (rand() % span); usleep(ms * 1000);
+}
