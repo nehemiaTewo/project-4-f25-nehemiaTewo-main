@@ -298,4 +298,3 @@ int main(int argc, char **argv) {
     log_event("Main", (unsigned long)pthread_self(), "served=%d created=%d", customers_served, customers_created);
     return 0;
 }
-
