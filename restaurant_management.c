@@ -14,7 +14,6 @@
 #define ORDER_Q_CAP  256
 #define DONE_Q_CAP   256
 
-// timestamp helper
 static void now_str(char *buf, size_t n) {
     struct timeval tv; gettimeofday(&tv, NULL);
     struct tm tm; localtime_r(&tv.tv_sec, &tm);
@@ -23,7 +22,6 @@ static void now_str(char *buf, size_t n) {
              tm.tm_hour, tm.tm_min, tm.tm_sec, (long)tv.tv_usec);
 }
 
-// one-line logger
 static void log_event(const char *role, unsigned long tid, const char *fmt, ...) {
     char ts[64]; now_str(ts, sizeof ts);
     fprintf(stdout, "%s | %s %lu | ", ts, role, tid);
@@ -38,7 +36,6 @@ typedef struct {
     customer_t *cust;
 } order_t;
 
-// per-customer state
 struct customer {
     int cid;
     pthread_mutex_t mu;
@@ -48,7 +45,7 @@ struct customer {
     bool meal_ready;
 };
 
-// waiting (customers) queue
+// waiting customers
 typedef struct {
     customer_t **buf; int cap; int head; int tail; int count;
     pthread_mutex_t mu; pthread_cond_t not_empty; pthread_cond_t not_full;
@@ -91,7 +88,6 @@ static int cq_try_pop(cust_queue_t *q, customer_t **out) {
     pthread_mutex_unlock(&q->mu); return ok;
 }
 
-// order queue (MPMC)
 typedef struct {
     order_t *buf; int cap; int head; int tail; int count;
     pthread_mutex_t mu; pthread_cond_t not_empty; pthread_cond_t not_full;
@@ -134,7 +130,7 @@ static int oq_try_pop(order_queue_t *q, order_t *out) {
     pthread_mutex_unlock(&q->mu); return ok;
 }
 
-// done queue = order queue (wrappers)
+// done queue 
 typedef order_queue_t done_queue_t;
 static void   dq_init(done_queue_t *q, int cap)        { oq_init(q, cap); }
 static void   dq_destroy(done_queue_t *q)              { oq_destroy(q); }
@@ -142,7 +138,6 @@ static void   dq_push(done_queue_t *q, order_t it)     { oq_push(q, it); }
 static order_t dq_pop(done_queue_t *q)                 { return oq_pop(q); }
 static int    dq_try_pop(done_queue_t *q, order_t *o)  { return oq_try_pop(q, o); }
 
-// globals and shared state
 static int TOTAL_CUSTOMERS, NUM_TABLES, NUM_WAITERS, NUM_CHEFS, WAITING_CAPACITY;
 static volatile int customers_created = 0;
 static volatile int customers_served  = 0;
@@ -157,9 +152,15 @@ static order_queue_t order_q;
 static done_queue_t  done_q;
 
 static void rnd_sleep_ms(int lo, int hi) {
-    int span = hi - lo + 1; if (span < 1) span = 1;
+    int span = hi - lo + 1;
+    if (span < 1) span = 1;
     int ms = lo + (rand() % span);
-    usleep(ms * 1000);
+
+    struct timespec req;
+    req.tv_sec  = ms / 1000;
+    req.tv_nsec = (long)(ms % 1000) * 1000000L;
+
+    while (nanosleep(&req, &req) == -1 && errno == EINTR) { }
 }
 
 static bool queues_all_empty(void) {
