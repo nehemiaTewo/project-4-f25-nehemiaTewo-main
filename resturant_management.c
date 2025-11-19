@@ -23,7 +23,6 @@ static void now_str(char *buf, size_t n) {
              tm.tm_hour, tm.tm_min, tm.tm_sec, (long)tv.tv_usec);
 }
 
-// Single-line, flushed logging
 static void log_event(const char *role, unsigned long tid, const char *fmt, ...) {
     char ts[64]; now_str(ts, sizeof ts);
     fprintf(stdout, "%s | %s %lu | ", ts, role, tid);
@@ -38,7 +37,6 @@ typedef struct {
     customer_t *cust;
 } order_t;
 
-// Per-customer state + condvars
 struct customer {
     int cid;
     pthread_mutex_t mu;
@@ -48,7 +46,6 @@ struct customer {
     bool meal_ready;
 };
 
-// Bounded MPMC queue (circular buffer)
 typedef struct {
     customer_t **buf; int cap; int head; int tail; int count;
     pthread_mutex_t mu; pthread_cond_t not_empty; pthread_cond_t not_full;
@@ -84,7 +81,6 @@ static int cq_try_pop(cust_queue_t *q, customer_t **out) {
     pthread_mutex_unlock(&q->mu); return ok;
 }
 
-// Same queue pattern for orders
 typedef struct {
     order_t *buf; int cap; int head; int tail; int count;
     pthread_mutex_t mu; pthread_cond_t not_empty; pthread_cond_t not_full;
@@ -106,7 +102,6 @@ static void oq_push(order_queue_t *q, order_t it) {
     pthread_cond_signal(&q->not_empty);
     pthread_mutex_unlock(&q->mu);
 }
-
 static order_t oq_pop(order_queue_t *q) {
     pthread_mutex_lock(&q->mu);
     while (q->count == 0) pthread_cond_wait(&q->not_empty, &q->mu);
@@ -121,7 +116,13 @@ static int oq_try_pop(order_queue_t *q, order_t *out) {
     pthread_mutex_unlock(&q->mu); return ok;
 }
 
+// Done queue
 typedef order_queue_t done_queue_t;
+static void dq_init(done_queue_t *q, int cap)        { oq_init(q, cap); }
+static void dq_destroy(done_queue_t *q)              { oq_destroy(q); }
+static void dq_push(done_queue_t *q, order_t it)     { oq_push(q, it); }
+static order_t dq_pop(done_queue_t *q)               { return oq_pop(q); }
+static int dq_try_pop(done_queue_t *q, order_t *out) { return oq_try_pop(q, out); }
 
 static int TOTAL_CUSTOMERS, NUM_TABLES, NUM_WAITERS, NUM_CHEFS, WAITING_CAPACITY;
 static volatile int customers_created = 0;
@@ -129,7 +130,7 @@ static volatile int customers_served  = 0;
 
 static pthread_mutex_t g_count_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_order_id_mu = PTHREAD_MUTEX_INITIALIZER;
-static int g_next_order_id = 1; // shared order id to avoid duplicates across waiters
+static int g_next_order_id = 1; // shared order id to avoid duplicates
 static sem_t tables_sem;
 
 static cust_queue_t waiting_q;
@@ -152,7 +153,7 @@ static bool queues_all_empty(void) {
     return empty;
 }
 
-// Customer: arrive → wait → meal → eat → leave
+// Customer: arrive - wait - meal - eat - leave
 static void *customer_thread(void *arg) {
     customer_t *c = (customer_t *)arg;
     unsigned long tid = (unsigned long)pthread_self();
@@ -183,7 +184,7 @@ static void *customer_thread(void *arg) {
     return NULL;
 }
 
-// Chef: cook orders, enqueue completed
+// Chef: cook orders 
 static void *chef_thread(void *arg) {
     (void)arg; unsigned long tid = (unsigned long)pthread_self();
     for (;;) {
@@ -204,7 +205,7 @@ static void *chef_thread(void *arg) {
     return NULL;
 }
 
-// Waiter: deliver dishes; seat customers; place orders
+// Waiter: deliver dishes place orders
 static void *waiter_thread(void *arg) {
     (void)arg; unsigned long tid = (unsigned long)pthread_self();
     for (;;) {
